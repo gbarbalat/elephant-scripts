@@ -1,0 +1,592 @@
+---
+title: "Reading cleaning data"
+author: "Guillaume Barbalat"
+date: "17/02/2022"
+output: html_document
+---
+
+summary
+- data reading and cleaning, with clustering of your analysis
+- conversion numeric to factors, ordered factors
+- create dummies
+- remove observations where N per cell is below N=5
+- ggplot2
+- table 1
+- accessing data on the internet
+- flowchart
+- gam and bayesian with INLA
+- VIM with lasso
+
+
+# data reading and cleaning
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(ggplot2)
+library(doParallel)
+
+here_data="G:/_DATA/"
+outcome_has_been_loaded=0
+##########
+#Y- DALYs read
+##########
+here_data_DALYs=paste0(here_data,"all_data_files_GBD/")
+list_files=list.files(path=here_data_DALYs, pattern =
+                        glob2rx("IHME-GBD_2019_DATA-*\\csv"))#
+
+read.csv("G:/_DATA/all_data_files_GBD/population/IHME_GBD_2019_POP_1990_Y2020M10D15.csv",
+         sep=";") %>%
+  dplyr::select(where(is.character))  %>%
+  lapply(table)
+         
+
+if (outcome_has_been_loaded==0) {
+
+  outcome_matrix=list()
+
+  num_cores <- detectCores()
+  cl <- makeCluster(num_cores-1)
+  clusterEvalQ(cl,library(dplyr))#c(library(SuperLearner),library(dplyr))
+  clusterExport(cl, list("here_data_DALYs","list_files"))
+
+  registerDoParallel(num_cores-1)
+  getDoParWorkers()
+
+
+  try_this <- function(i) {
+
+    tmp=read.csv(paste0(here_data_DALYs,list_files[i]))
+    outcome_matrix <- tmp %>%
+      select(-c("upper","lower"))
+
+    return(outcome_matrix)
+  }
+
+
+  system.time(outcome_matrix <-clusterApply(cl,1:length(list_files),try_this))
+
+  stopCluster(cl)
+
+  outcome_matrix_=as_tibble(bind_rows(outcome_matrix))
+}
+
+
+
+ideal_matrix<-data.frame(location=unique(col1$c1)) %>%
+  left_join(data.frame(year=unique(col2$c2)), by=character())
+
+not_ideal_matrix <- ideal_matrix[-sample(1:nrow(ideal_matrix), 10), ]
+not_ideal_matrix$y <- 4
+
+#create an ideal matrix
+joined <- ideal_matrix %>%
+  left_join(not_ideal_matrix,by=c("location","year"))
+colSums(is.na(joined))
+joined[which(is.na(joined$y)),]
+
+
+load("G:/PROJECTS/2022/sAP Globalization/OUD.RData")
+
+outcome_matrix_ %>%
+  # filter(age=="25 to 29") %>%
+  dplyr::filter(location=="Austria") %>%
+  filter(!grepl('ARC', Study.Subject.ID)) %>% #row contains this ...
+  dplyr::select(where(is.character))  %>%
+  select(starts_with)#contains, #matches
+  lapply(table)
+
+  #filter, mutate, case_when, group_by and create a column that takes into account the grouping
+final_matrix_final <-  final_matrix_2019 %>% 
+  filter(Quality>=3) %>%
+  mutate(Quality = Quality - 3,
+         bin_KOFGI=case_when(
+         KOFGI>median(KOFGI, na.rm=TRUE) ~ 1,
+         KOFGI<=median(KOFGI, na.rm=TRUE) ~ 0 )
+         ) %>%
+  
+  group_by(bin_KOFGI) %>%
+  mutate(KOFGI_ctrd=scale(KOFGI,scale = FALSE)) %>%
+  relocate(KOFGI_ctrd, .after = KOFGI)
+
+anti_join #one but not the other
+
+library(tidyr)
+remain_ %>%
+  pivot_longer(cols=everything(),
+               names_to="set",
+               values_to="LISTE_DOMAINE_SOIN",
+               values_drop_na=TRUE
+               )
+
+```
+
+# conversion numeric to factors, ordered factors
+
+```{r}
+#non-numeric to numeric
+temperature_vector <- c("High", "Low", "High", "Low", "Medium")
+temperature_vector_num <- factor(temperature_vector,
+                                 #order=TRUE,
+                                 levels = as.character(unique(temperature_vector)))
+as.numeric(temperature_vector_num);
+
+#char to ordinal
+temperature_vector <- c("High", "Low", "High", "Low", "Medium")
+factor_temperature_vector <- factor(temperature_vector, 
+                                    order = TRUE, #this makes it an ordinal variable
+                                    levels = c("Low", "Medium", "High"))
+
+#numeric to ordinal
+temperature_vector <- c(3, 1, 3, 1, 2)
+factor_temperature_vector <- factor(temperature_vector, 
+                                    order = TRUE, #this makes it an ordinal variable
+                                    levels = c(1, 2, 3))
+
+```
+
+# create dummies
+
+```{r}
+library(fastDummies)
+dummy_cols(
+  .data,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,#to avoid multicol
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = FALSE#removes the columns used to generate the dummy columns
+)
+
+#alternative: tribute to Susan Gruber!!!
+ethnicCat <- factor(c("a", "b", "a", "b", "c"))
+age <- c(31, 28, 43, 41, 50)
+
+W <- data.frame(ethnicCat, age)
+
+W.converted <- model.matrix(tempY ~ ., data = data.frame(tempY = 1:nrow(W), W))[, -1]
+    if (is.vector(W.converted)) {
+        W.converted <- as.matrix(W.converted)
+    }
+
+# at this point W.converted has two binary columns, “ethnicCatb”, “ethnicCatc”, “age”
+```
+
+# remove observations where N per cell is below N=5
+
+```{r}
+
+#select cells you want to work on
+df1 <- SL_data %>% 
+  dplyr::select(-StudySubjectID) %>%
+  dplyr::select(where(is.factor)) 
+
+#concatenate from list and find names of each columns
+k=do.call("c",df1);names(k)=sub(".*\\.", "", names(k))
+
+#create key to recode
+tmp2=which(k < 2);tmp2[]=NA_character_
+
+#recode with NA
+if (length(tmp2)!=0) {
+df2 <- df1 %>% 
+  mutate(across(everything(), ~recode(., !!!tmp2)
+  ))
+}
+
+#take out NA
+SL_data <- SL_data[complete.cases(df2),]
+
+#drop levels
+SL_data <- SL_data %>% 
+  mutate(across(where(is.factor),~droplevels(.)))
+```
+
+
+# ggplot2
+
+```{r}
+
+ggplot(data=TAB_EST,
+          aes(x = Disorder,y = Estimate, 
+              ymin = Estimate-1.96*SE, ymax = Estimate+1.96*SE))+#,colour="black"))+#pval>0.05 "black"
+  geom_hline(yintercept =0, linetype=2)+
+  geom_pointrange(aes(x=Disorder))+#,colour="red" ,size=1)+#pval>0.05 "black"
+  labs(x='Disorder',y="Estimate",title = 'B. Individualism')+
+  geom_errorbar(aes(ymin=Estimate-1.96*SE, ymax=Estimate+1.96*SE),#colour="black",#pval>0.05 "black"
+                width=0.25,cex=2)+
+  theme(legend.position = "none",
+        panel.background = element_rect(fill = "white",colour = "black"),
+        strip.background = element_rect(colour = "black", fill = "white"),
+        axis.title.x = element_text(face = "bold",size=16),
+        axis.title.y = element_blank(),#element_text(face = "bold",size=16),
+        axis.text.y=element_text(face = "bold",size=16),
+        axis.text.x = element_text(colour = "black", size=12),# 
+        plot.title = element_text(colour = "black",face="bold", size=20)#,hjust = 0.5)#family, 
+  )+
+  scale_x_discrete(limits = c("eat","anx","bip","dep"),
+                   labels=c("Eating\ndisorders","Anxiety\ndisorders",
+                            "Bipolar\ndisorders","Depressive\ndisorders")
+  )+
+  coord_flip()#+
+  #facet_wrap(~Effect)
+
+scale_fill_gradient2(low = "blue", high = "red") +
+      theme(legend.title = element_blank(),
+            legend.position = c(.95,.60),
+            panel.background = element_rect(fill = "grey"),
+            legend.box  = "none",
+            panel.grid = element_blank())
+```
+
+# table 1
+
+```{r}
+library(table1)
+
+my.render.cont <- function(x) {
+    with(stats.default(x), 
+         sprintf("%0.2f (%0.1f)", MEAN, SD))
+}
+
+table1(~ AGE+SEX+EDUCATION + FAM +  DX2 + EMPLOYMENT+
+         GAF+CGI+FIRST_CONTACT+
+         ILLNESS_DURATION + HOSPITAL 
+       | DX#*age
+       , data=data,  rowlabelhead = "Variables",
+       render.continuous=my.render.cont)
+
+
+```
+
+# accessing data on the internet
+
+```{r}
+#packages install
+{
+#read 
+  #https://slcladal.github.io/webcrawling.html
+install.packages("rvest")
+install.packages("readtext")
+install.packages("webdriver")
+webdriver::install_phantomjs()
+# install klippy for copy-to-clipboard button in code chunks
+remotes::install_github("rlesur/klippy")
+}
+
+
+# set options
+options(stringsAsFactors = F)         # no automatic data transformation
+options("scipen" = 100, "digits" = 4) # suppress math annotation
+# load packages
+library(tidyverse)
+library(rvest)
+library(readtext)
+library(webdriver)
+# activate klippy for copy-to-clipboard button
+klippy::klippy()
+
+# define url
+url <- "https://www.theguardian.com/world/2017/jun/26/angela-merkel-and-donald-trump-head-for-clash-at-g20-summit"
+# download content
+webc <- rvest::read_html(url)
+# inspect
+webc
+
+webc %>%
+  # extract paragraphs
+  rvest::html_nodes("p") %>%
+  # extract text
+  rvest::html_text() -> webtxt
+# inspect
+head(webtxt)
+
+#headline
+webc %>%
+  # extract paragraphs
+  rvest::html_nodes("h1") %>%
+  # extract text
+  rvest::html_text() -> header
+# inspect
+head(header)
+
+pjs_instance <- run_phantomjs()
+pjs_session <- Session$new(port = pjs_instance$port)
+
+url <- "https://www.theguardian.com/world/angela-merkel"
+# go to URL
+pjs_session$go(url)
+# render page
+rendered_source <- pjs_session$getSource()
+# download text and parse the source code into an XML object
+html_document <- read_html(rendered_source)
+
+links <- html_document %>%
+  html_nodes(xpath = "//div[contains(@class, 'fc-item__container')]/a") %>%
+  html_attr(name = "href")
+# inspect 
+links
+
+
+#seems like a good webpage
+#https://github.com/yusuzech/r-web-scraping-cheat-sheet/blob/master/README.md
+#https://resulumit.com/teaching/scrp_workshop.html#171
+{
+  library(RSelenium)
+  library(httr)
+
+# start the server and browser(you can use other browsers here)
+rD <- rsDriver(browser=c("firefox"))
+
+driver <- rD[["client"]]
+# navigate to an URL
+driver$navigate("http://ghdx.healthdata.org/gbd-results-tool")#("https://www.google.com/")
+#selcet input box
+element <- driver$findElement(using = "css", value = "#react-select-3--value .Select-input")
+element$highlightElement()
+
+driver$mouseMoveToLocation(webElement = element)
+
+
+webElem <- driver$findElement(using = 'xpath', value = "//[(@id = "react-select-3--value")]//")
+#"//span[contains(text(),'27 Cancer of ovary')]/parent::a
+
+  #[contains(concat( " ", @class, " " ), concat( " ", "Select-input", " " ))]
+#driver
+driver$executeScript("arguments[0].click();", list(webElem))
+
+
+#send text to input box. don't forget to use `list()` when sending text
+element$sendKeysToElement(list(key="down_arrow"))
+element$clickElement()
+element$sendKeysToElement(list(value="Prevalence",key="enter"))
+element$click(buttonId = "")
+
+
+rm(rD)
+gc()
+
+#close the driver
+driver$close()
+
+#close the server
+rD[["server"]]$stop()
+}
+```
+
+
+# flowchart
+https://rich-iannone.github.io/DiagrammeR/graphviz_and_mermaid.html
+
+```{r}
+
+library(DiagrammeR)
+grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+
+      # edge definitions with the node IDs
+      tab1 -> tab2;
+      tab2 -> tab3;
+      tab2 -> tab4 -> tab5
+      }
+
+      [1]: 'Questionnaire sent to n=1000 participants'
+      [2]: 'Participants came to clinic for evaluation n=700'
+      [3]: 'Participants non-eligible for the study n=100'
+      [4]: 'Participants eligible for the study n=600'
+      [5]: 'Study sample n=600'
+      ")
+```
+
+
+
+# gam
+
+Alternatively, one can think of implementing these models using a
+hierarchical Bayesian framework, with hyperparameters representing
+constraints on parameter estimates. However, Bayesian inference on such latent
+Gaussian models (LGM) is not straight forward since, in general, the posterior
+distribution is not analytically available. Markov Chain Monte Carlo (MCMC)
+techniques are the standard solution to this issue, yet they are computationally
+very intensive and difficult to implement. Integrated Nested Laplace
+Approximation (INLA) is a more recent tool for Bayesian inference on latent
+Gaussian models when the focus is on posterior marginal distributions. INLA
+substitutes MCMC simulations with accurate, deterministic approximations to
+posterior distriubtions. The quality of these approximations is in general very
+high, such that even very long MCMC runs could not detect any errors. According
+to LGM, there is a n-dimensional field $x$. Both the covariance matrix of the
+Gaussian field $x$, and the likelihood model for $y/x$ can be controlled by some
+unknown hyperparameters ${\theta}$. Importantly these generalized structured
+additive regression models which can take many different forms such as -
+non-linear effects of continuous covariates - time trends, - seasonal effects -
+iid random intercepts and slopes - group specific random effects and spatial
+random effects. Linear parameters, unknown functions and . THe INLA library
+requires each data point $y$ to be dependent on the latent Gaussian field only
+through one single element of $x$. The hyperparameters theta are assigned a
+prior distribution. Importantly, - the LGM x admits conditional independence
+properties: it is a latent Gaussian Markov random field with a sparse precision
+matrix. - the dimensions of the hyperparameters are small, >6 With these
+conditions, INLA provides a recipe for fast Bayesian inference using accurate
+approximations of marginal posterior densities of hyperparameters and for the
+posterior densities for the latent variables $x$. We assume DALYs for each
+mental disorders to be conditionnally independent Gaussian variables of mean
+${\eta_i}$ and unknown precision (the precision matrix is the inverse of the
+variance-covariance matrix) ${\tau_i}$
+Let us define a first model as
+$${\eta_i}={\mu}+z_i^T{\beta}+f_s(s_i)+f_u(s_i)$$ - spatially structured
+component - spatially unstructured component, which is i.i.d normally
+distributed with zero mean and unknown precision which is assumed to vary
+smoothly from region to region. $f_u(s_i)$ is modelled as an intrinsic Gaussian
+Markove random field with unknown precision, which is a conditionnally
+auto-regressve prior (CAR).
+The latent Gaussian field $x$ is $\{\mu;\beta;f_s;f_u;\eta_i\}$ 
+The hyperparameter vector ${\theta}$ is composed by
+the precision $\tau$. Vague independent Gamma priors are assigned to each element of $\theta$.
+
+As mentioned above, in an age-period-cohort model, one wants to constrain age, period and cohort effects to solve the identifiability issues. In other words, one wishes to stipulate that the age, period and cohort effects are non-linear. The model is therefore as follows:
+$${\eta_i}={\mu}+z_i^T{\beta}+f_a(age)+f_p(period)+f_c(cohort)+f_s(s_i)+f_u(s_i)$$;
+
+Here, $f_a , f_p, f_c$ follow an instrinsic second-order random-walk model with unknown precision $\tau_a, \tau_p, \tau_c$.
+
+Overall, to ensure the identifiability of $\mu$, a sum-to-zero constraint (`constr=TRUE`) must be imposed on all $f$
+
+As an alternative hypothesis to explain spatial variability one could imagine that the effect of one covariate has a different slope for different regions. A weight would then be imposed on the spatial variability by what was previously the covariate. This kind of models are known as space-varying regression models.
+
+
+Yet another possibility is to use a gam model where parameters could be represented in a linear way and add spatial and temporal basis functions
+
+```{r eval=FALSE}
+library(mgcv)#mgcv or gamm4
+library(gamm4)
+
+#Variables may be included based on LASSO Selection.
+
+      #s() + stb weights + corr
+      k_a2<-gamm(val_log~
+                   s(V1,V2, k=-1,bs='gp', m=2)+#k=nb_df,
+                   s(temporal)+
+                   Joy_r+Indiv_r+#Trust_r+
+                   SDI+Unemploy_r+p90p100+
+                   gallup+
+                   haqi+Nb_Sources+coeff_var
+                 , family=gaussian()#poisson(), quasipoisson(), nb
+                 #  ,correlation = corSpher(form = ~V1+V2),#location_factor|region_factor
+                 #include temporal correlation structur?
+                 weights = (pop/sum(pop)),#(tmp_a$pop)/(sum(tmp_a$pop))
+                 na.action = na.omit,
+                 data=tmp_a)
+      
+      # k_a4<-gamV(val_log~s(V1,V2, k=-1,bs='gp', m=2)+#k=nb_df,
+      #              Joy_r+Indiv_r+#Trust_r+
+      #              SDI+Unemploy_r+p90p100+
+      #              gallup+
+      #              haqi+Nb_Sources+coeff_var
+      #            , family=gaussian()#poisson(), quasipoisson(), nb
+      #            ,aGam = list(weights = (1/tmp_a$pop),#/(sum(1/tmp_a$pop)),
+      #                         na.action = na.omit),
+      #            data=tmp_a)
+      
+      print(check.gamViz(k_output[[i]][[j]]))
+      influence.gam(k_output[[i]][[5]])[35]#leverage
+```
+
+
+# VIM with lasso
+```{r}
+library(glmnet)
+glmnet1=sl[[i]][[1]]$fitLibrary$SL.glmnet_All$object
+coeff_glmnet1<-coef(glmnet1,s='lambda.min')#lambda.min lambda.1se
+var_glmnet<- data.frame(name = coeff_glmnet1@Dimnames[[1]][coeff_glmnet1@i + 1],
+           coefficient = coeff_glmnet1@x)
+print(var_glmnet)
+```
+
+# CEA 
+
+```{r}
+DW_0
+Age_std_DALYs_0
+ES_1
+Andrews_factor
+pct_coverage=0.8
+
+DW_1=DW_0-(ES_1*Andrews_factor)
+pct_improved_1=(DW_1-DW_0)/DW_0
+Age_std_DALYs_1=Age_std_DALYs_0-pct_improved1*pct_coverage*Age_std_DALYs_0
+Averted_DALYs_1=Age_std_DALYs_1-Age_std_DALYs_0
+
+
+
+
+```
+
+# tmle
+
+```{r}
+library(tmle)
+system.time(
+  tmle_baseline <- tmleMSM(Y=design_matrix$Y,
+                     A=design_matrix$bin_KOFGI,
+                     W=select(design_matrix,c(unemploy:haqi #unemploy or KOFGI_ctrd
+                                             #,age_num,sex_num #no!!!
+                                             #,c(location_Albania:location_Zimbabwe)#location FE 
+                                             #,c(year_1992:year_2019)# year FE
+                                             ,Quality,Y_0#,pct_pop
+                                             )),
+                     #T=design_matrix$year-1990,
+                     #V=matrix(1, ncol=1, nrow=nrow(design_matrix)),#if no V
+                     V=select(design_matrix,sex_num),#c(sex_num, age_num)
+                     id=design_matrix$location,#correlation within units
+                     
+        Q.SL.library = all_libraries,#all_libraries, little_libraries
+        Qbounds = c(0, Inf),
+        g.SL.library = all_libraries,#all_libraries,# little_libraries
+        MSM="A*V",#"A*V*T"
+        verbose=TRUE,
+        V_SL = 20
+        )
+  )
+
+```
+
+# Next ...
+```{r}
+# tmp<-read.csv("C:/Users/Guillaume/Downloads/essaiexport.csv")
+# tmp2<-tmp %>% 
+#   filter(!grepl('ARC', Study.Subject.ID)) #%>%
+#   #select(starts_with(match = "LISTE_"))#contains, #matches
+# 
+# all_PEC<-read.csv(file="G:/_DATA/CRR/REHABase/REHABASE_PEC_allPEC.csv",
+#                   header=TRUE, sep=",")
+# all_PEC=subset(all_PEC,select=c("StudySubjectID","ProtocolID","LISTE_DOMAINE_SOIN",
+#                                 "MODAL_PEC","NB_HEURES","DATE_DEB"))
+# 
+# First_Network_REHABASE_tot = read.csv(file="G:/_DATA/CRR/REHABase/extract15062021_csv.csv",
+#                                       header=TRUE, sep="\t")
+# 
+# 
+# remain_1 <- tmp2 %>%
+#   anti_join(all_PEC,by=c("Study.Subject.ID"="StudySubjectID")) 
+# remain_1_1 <-remain_1 %>%
+#   select(-c(Protocol.ID,Person.ID)) %>%
+#   pivot_longer(cols=-Study.Subject.ID,
+#                names_to="set",
+#                values_to="LISTE_DOMAINE_SOIN",
+#                values_drop_na=TRUE
+#                ) %>%
+#   filter(LISTE_DOMAINE_SOIN %in% c(2,4,5,6,7,8,9,11,13,15))
+# 
+# colSums(!is.na(select(remain_1,-c(Study.Subject.ID,Protocol.ID,Person.ID))))
+# 
+# 
+# remain_2 <- tmp2 %>%
+#   anti_join(First_Network_REHABASE_tot,by="Study.Subject.ID")
+###
+```

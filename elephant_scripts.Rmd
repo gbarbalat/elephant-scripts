@@ -13,6 +13,8 @@ summary
 - ggplot2
 - table 1
 - accessing data on the internet
+- CEA
+- tmle
 - flowchart
 - gam and bayesian with INLA
 - VIM with lasso
@@ -119,6 +121,18 @@ remain_ %>%
                values_drop_na=TRUE
                )
 
+#relocate
+df %>%
+  relocate(KOFGI_ctrd, .after = KOFGI) %>%
+  
+  #replace
+  df <- df %>% replace(.=="MISSING", NA)
+
+#substitute and start_with
+df %>%
+  mutate(across(everything(.),~ gsub(",",".", .))) %>%
+  mutate(across(starts_with("Importance"),~as.numeric(.x)))
+
 ```
 
 # conversion numeric to factors, ordered factors
@@ -142,6 +156,8 @@ temperature_vector <- c(3, 1, 3, 1, 2)
 factor_temperature_vector <- factor(temperature_vector, 
                                     order = TRUE, #this makes it an ordinal variable
                                     levels = c(1, 2, 3))
+
+#substitute characters
 
 ```
 
@@ -527,33 +543,151 @@ Averted_DALYs_1=Age_std_DALYs_1-Age_std_DALYs_0
 
 ```
 
-# tmle
+# tmleMSM
 
 ```{r}
 library(tmle)
-system.time(
-  tmle_baseline <- tmleMSM(Y=design_matrix$Y,
-                     A=design_matrix$bin_KOFGI,
-                     W=select(design_matrix,c(unemploy:haqi #unemploy or KOFGI_ctrd
-                                             #,age_num,sex_num #no!!!
-                                             #,c(location_Albania:location_Zimbabwe)#location FE 
-                                             #,c(year_1992:year_2019)# year FE
-                                             ,Quality,Y_0#,pct_pop
-                                             )),
+library(dplyr)
+n=250
+A <- sample(c(0:3),n,replace=TRUE)
+  W <- matrix(rnorm(n*3), ncol=3)
+    colnames(W) <- paste("W",1:3, sep="")
+
+  Y <- A + 2*W[,1] + W[,3] + W[,2]^2 + rnorm(n)
+  
+  
+design_matrix <- data.frame(A,W,Y)
+  
+design_matrix <- fastDummies::dummy_cols(design_matrix,
+                        select_columns = "A",
+                        )
+
+design_matrix <- design_matrix %>%
+  mutate(V=A,
+         A=case_when(A_0==0 ~ 1,
+                     A_0==1 ~ 0)
+         ) #%>%
+  # rename()
+
+#MSM with categorical A
+{system.time(
+  tmle_MSM_categA <- tmleMSM(Y=design_matrix$Y,
+                     A=design_matrix$A,
+                     W=select(design_matrix,c(W1,W2,W3)),
                      #T=design_matrix$year-1990,
                      #V=matrix(1, ncol=1, nrow=nrow(design_matrix)),#if no V
-                     V=select(design_matrix,sex_num),#c(sex_num, age_num)
-                     id=design_matrix$location,#correlation within units
+                     V=select(design_matrix,c(A_1,A_2,A_3)),#c(sex_num, age_num)
+                     #id=design_matrix$location,#correlation within units
                      
-        Q.SL.library = all_libraries,#all_libraries, little_libraries
-        Qbounds = c(0, Inf),
-        g.SL.library = all_libraries,#all_libraries,# little_libraries
-        MSM="A*V",#"A*V*T"
-        verbose=TRUE,
-        V_SL = 20
+        #Q.SL.library = all_libraries,#all_libraries, little_libraries
+        #Qbounds = c(0, Inf),
+        #g.SL.library = all_libraries,#all_libraries,# little_libraries
+        MSM="V",#"A:V" similar
+        #verbose=TRUE,
+        V_SL = 2
         )
   )
+tmle_MSM_categA}
 
+{system.time(
+  tmle_MSM_contA <- tmleMSM(Y=design_matrix$Y,
+                     A=design_matrix$A,
+                     W=select(design_matrix,c(W1,W2,W3)),
+                     #T=design_matrix$year-1990,
+                     #V=matrix(1, ncol=1, nrow=nrow(design_matrix)),#if no V
+                     V=select(design_matrix,V),#c(sex_num, age_num)
+                     #id=design_matrix$location,#correlation within units
+                     
+        #Q.SL.library = all_libraries,#all_libraries, little_libraries
+        #Qbounds = c(0, Inf),
+        #g.SL.library = all_libraries,#all_libraries,# little_libraries
+        MSM="V",#"A:V"
+        verbose=TRUE,
+        V_SL = 2
+        )
+  )
+tmle_MSM_contA}
+
+
+```
+
+# tmle3
+
+``` {r}
+
+library(tmle3)
+library(sl3)
+data(cpp)
+cpp <- cpp[!is.na(cpp[, "haz"]), ]
+cpp$parity01 <- as.numeric(cpp$parity > 0)
+cpp[is.na(cpp)] <- 0
+cpp$haz01 <- as.numeric(cpp$haz > 0)
+
+npsem <- list(
+  define_node("W", c(
+    "apgar1", "apgar5", "gagebrth", "mage",
+    "meducyrs", "sexn"
+  )),
+  define_node("A", c("parity01"), c("W")),
+  define_node("Y", c("haz01"), c("A", "W"))
+)
+
+tmle_task <- tmle3_Task$new(cpp, npsem = npsem)
+
+# get the outcome node data
+head(tmle_task$get_tmle_node("Y"))
+# get the sl3 task corresponding to an outcome regression
+tmle_task$get_regression_task("Y")
+
+# set up sl3 learners for tmle3 fit
+lrnr_glm_fast <- make_learner(Lrnr_glm_fast)
+lrnr_mean <- make_learner(Lrnr_mean)
+# define and fit likelihood
+factor_list <- list(
+  define_lf(LF_emp, "W"),
+  define_lf(LF_fit, "A", lrnr_glm_fast),
+  define_lf(LF_fit, "Y", lrnr_glm_fast, type="mean")
+)
+
+likelihood_def <- Likelihood$new(factor_list)
+likelihood <- likelihood_def$train(tmle_task)
+print(likelihood)
+
+likelihood_values <- likelihood$get_likelihoods(tmle_task,"Y")
+head(likelihood_values)
+
+intervention <- define_lf(LF_static, "A", value = 1)
+
+cf_likelihood <- make_CF_Likelihood(likelihood, intervention)
+
+cf_likelihood_values <- cf_likelihood$get_likelihoods(tmle_task, "A")
+head(cf_likelihood_values)
+
+cf_likelihood_tasks <- cf_likelihood$enumerate_cf_tasks(tmle_task)
+head(cf_likelihood_tasks[[1]]$data)
+
+tsm <- define_param(Param_TSM, likelihood, intervention)
+
+updater <- tmle3_Update$new()
+targeted_likelihood <- Targeted_Likelihood$new(likelihood, updater)
+
+tsm <- define_param(Param_TSM, likelihood, intervention)
+updater$tmle_params <- tsm
+
+tmle_fit <- fit_tmle3(tmle_task, targeted_likelihood, tsm, updater)
+print(tmle_fit)
+
+nodes <- list(W = c("apgar1", "apgar5", "gagebrth", "mage", "meducyrs",
+                    "sexn"),
+              A = "parity01",
+              Y = "haz01")
+lrnr_glm_fast <- make_learner(Lrnr_glm_fast)
+lrnr_mean <- make_learner(Lrnr_mean)
+learner_list <- list(Y = lrnr_mean, A = lrnr_glm_fast)
+# make a new copy to deal with data.table weirdness
+cpp2 <- data.table::copy(cpp)
+tmle_fit_from_spec <- tmle3(tmle_ATE(), cpp2, nodes, learner_list)#tmle_TSM_all
+print(tmle_fit_from_spec)
 ```
 
 # Next ...

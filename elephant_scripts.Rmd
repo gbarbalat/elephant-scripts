@@ -1,26 +1,24 @@
 ---
 title: "Reading cleaning data"
 author: "Guillaume Barbalat"
-date: "17/02/2022"
+date: "April/2022"
 output: html_document
 ---
 
 summary
-- data reading and cleaning, with clustering of your analysis
-- conversion numeric to factors, ordered factors
-- create dummies
-- remove observations where N per cell is below N=5
-- ggplot2
-- table 1
-- accessing data on the internet
-- CEA
-- tmle
-- flowchart
-- gam and bayesian with INLA
-- VIM with lasso
+1- data reading and cleaning, with paralleling of your analysis
+2- ggplot2
+3- table 1
+4- flowchart
+5- accessing data on the internet
+6- gam and bayesian with INLA
+7- VIM with lasso
+8- CEA
+9- tmle
 
+# 1-data reading and cleaning
 
-# data reading and cleaning
+## a-reading files, paralleling
 
 ```{r}
 rm(list=ls())
@@ -72,9 +70,12 @@ if (outcome_has_been_loaded==0) {
 
   outcome_matrix_=as_tibble(bind_rows(outcome_matrix))
 }
+```
 
 
+## b-merging, selecting, filtering, relocating, wide to long
 
+```{r}
 ideal_matrix<-data.frame(location=unique(col1$c1)) %>%
   left_join(data.frame(year=unique(col2$c2)), by=character())
 
@@ -121,21 +122,9 @@ remain_ %>%
                values_drop_na=TRUE
                )
 
-#relocate
-df %>%
-  relocate(KOFGI_ctrd, .after = KOFGI) %>%
-  
-  #replace
-  df <- df %>% replace(.=="MISSING", NA)
-
-#substitute and start_with
-df %>%
-  mutate(across(everything(.),~ gsub(",",".", .))) %>%
-  mutate(across(starts_with("Importance"),~as.numeric(.x)))
-
 ```
 
-# conversion numeric to factors, ordered factors
+## c-conversion numeric to factors, ordered factors
 
 ```{r}
 #non-numeric to numeric
@@ -157,11 +146,9 @@ factor_temperature_vector <- factor(temperature_vector,
                                     order = TRUE, #this makes it an ordinal variable
                                     levels = c(1, 2, 3))
 
-#substitute characters
-
 ```
 
-# create dummies
+## d-create dummies
 
 ```{r}
 library(fastDummies)
@@ -189,7 +176,7 @@ W.converted <- model.matrix(tempY ~ ., data = data.frame(tempY = 1:nrow(W), W))[
 # at this point W.converted has two binary columns, “ethnicCatb”, “ethnicCatc”, “age”
 ```
 
-# remove observations where N per cell is below N=5
+## e-remove observations where N per cell is below N=5
 
 ```{r}
 
@@ -220,18 +207,20 @@ SL_data <- SL_data %>%
 ```
 
 
-# ggplot2
+# 2-ggplot2
 
 ```{r}
+pd <- position_dodge(width = 0.3)
 
 ggplot(data=TAB_EST,
           aes(x = Disorder,y = Estimate, 
               ymin = Estimate-1.96*SE, ymax = Estimate+1.96*SE))+#,colour="black"))+#pval>0.05 "black"
-  geom_hline(yintercept =0, linetype=2)+
+  geom_hline(aes(yintercept =0), linetype=2,linetype="dashed")+
   geom_pointrange(aes(x=Disorder))+#,colour="red" ,size=1)+#pval>0.05 "black"
-  labs(x='Disorder',y="Estimate",title = 'B. Individualism')+
+  geom_point(position=pd)+
+  labs(x='Disorder',y="Estimate",title = 'B. Individualism', colour="Weight truncation")+
   geom_errorbar(aes(ymin=Estimate-1.96*SE, ymax=Estimate+1.96*SE),#colour="black",#pval>0.05 "black"
-                width=0.25,cex=2)+
+                width=0.25,cex=2,, position=pd)+
   theme(legend.position = "none",
         panel.background = element_rect(fill = "white",colour = "black"),
         strip.background = element_rect(colour = "black", fill = "white"),
@@ -243,9 +232,10 @@ ggplot(data=TAB_EST,
   )+
   scale_x_discrete(limits = c("eat","anx","bip","dep"),
                    labels=c("Eating\ndisorders","Anxiety\ndisorders",
-                            "Bipolar\ndisorders","Depressive\ndisorders")
-  )+
-  coord_flip()#+
+                            "Bipolar\ndisorders","Depressive\ndisorders")+
+  scale_colour_manual(values = c("black", "darkblue","lightblue","grey"))+
+
+  coord_flip()+
   #facet_wrap(~Effect)
 
 scale_fill_gradient2(low = "blue", high = "red") +
@@ -254,9 +244,10 @@ scale_fill_gradient2(low = "blue", high = "red") +
             panel.background = element_rect(fill = "grey"),
             legend.box  = "none",
             panel.grid = element_blank())
+
 ```
 
-# table 1
+# 3-table 1
 
 ```{r}
 library(table1)
@@ -276,7 +267,37 @@ table1(~ AGE+SEX+EDUCATION + FAM +  DX2 + EMPLOYMENT+
 
 ```
 
-# accessing data on the internet
+# 4-flowchart
+https://rich-iannone.github.io/DiagrammeR/graphviz_and_mermaid.html
+
+```{r}
+
+library(DiagrammeR)
+grViz("digraph flowchart {
+      # node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle]        
+      tab1 [label = '@@1']
+      tab2 [label = '@@2']
+      tab3 [label = '@@3']
+      tab4 [label = '@@4']
+      tab5 [label = '@@5']
+
+      # edge definitions with the node IDs
+      tab1 -> tab2;
+      tab2 -> tab3;
+      tab2 -> tab4 -> tab5
+      }
+
+      [1]: 'Questionnaire sent to n=1000 participants'
+      [2]: 'Participants came to clinic for evaluation n=700'
+      [3]: 'Participants non-eligible for the study n=100'
+      [4]: 'Participants eligible for the study n=600'
+      [5]: 'Study sample n=600'
+      ")
+```
+
+
+# 5-accessing data on the internet
 
 ```{r}
 #packages install
@@ -391,39 +412,7 @@ rD[["server"]]$stop()
 }
 ```
 
-
-# flowchart
-https://rich-iannone.github.io/DiagrammeR/graphviz_and_mermaid.html
-
-```{r}
-
-library(DiagrammeR)
-grViz("digraph flowchart {
-      # node definitions with substituted label text
-      node [fontname = Helvetica, shape = rectangle]        
-      tab1 [label = '@@1']
-      tab2 [label = '@@2']
-      tab3 [label = '@@3']
-      tab4 [label = '@@4']
-      tab5 [label = '@@5']
-
-      # edge definitions with the node IDs
-      tab1 -> tab2;
-      tab2 -> tab3;
-      tab2 -> tab4 -> tab5
-      }
-
-      [1]: 'Questionnaire sent to n=1000 participants'
-      [2]: 'Participants came to clinic for evaluation n=700'
-      [3]: 'Participants non-eligible for the study n=100'
-      [4]: 'Participants eligible for the study n=600'
-      [5]: 'Study sample n=600'
-      ")
-```
-
-
-
-# gam
+# 6-gam
 
 Alternatively, one can think of implementing these models using a
 hierarchical Bayesian framework, with hyperparameters representing
@@ -514,7 +503,7 @@ library(gamm4)
 ```
 
 
-# VIM with lasso
+# 7-VIM with lasso
 ```{r}
 library(glmnet)
 glmnet1=sl[[i]][[1]]$fitLibrary$SL.glmnet_All$object
@@ -524,7 +513,7 @@ var_glmnet<- data.frame(name = coeff_glmnet1@Dimnames[[1]][coeff_glmnet1@i + 1],
 print(var_glmnet)
 ```
 
-# CEA 
+# 8-CEA 
 
 ```{r}
 DW_0
@@ -543,151 +532,33 @@ Averted_DALYs_1=Age_std_DALYs_1-Age_std_DALYs_0
 
 ```
 
-# tmleMSM
+# 9-tmle
 
 ```{r}
 library(tmle)
-library(dplyr)
-n=250
-A <- sample(c(0:3),n,replace=TRUE)
-  W <- matrix(rnorm(n*3), ncol=3)
-    colnames(W) <- paste("W",1:3, sep="")
-
-  Y <- A + 2*W[,1] + W[,3] + W[,2]^2 + rnorm(n)
-  
-  
-design_matrix <- data.frame(A,W,Y)
-  
-design_matrix <- fastDummies::dummy_cols(design_matrix,
-                        select_columns = "A",
-                        )
-
-design_matrix <- design_matrix %>%
-  mutate(V=A,
-         A=case_when(A_0==0 ~ 1,
-                     A_0==1 ~ 0)
-         ) #%>%
-  # rename()
-
-#MSM with categorical A
-{system.time(
-  tmle_MSM_categA <- tmleMSM(Y=design_matrix$Y,
-                     A=design_matrix$A,
-                     W=select(design_matrix,c(W1,W2,W3)),
+system.time(
+  tmle_baseline <- tmleMSM(Y=design_matrix$Y,
+                     A=design_matrix$bin_KOFGI,
+                     W=select(design_matrix,c(unemploy:haqi #unemploy or KOFGI_ctrd
+                                             #,age_num,sex_num #no!!!
+                                             #,c(location_Albania:location_Zimbabwe)#location FE 
+                                             #,c(year_1992:year_2019)# year FE
+                                             ,Quality,Y_0#,pct_pop
+                                             )),
                      #T=design_matrix$year-1990,
                      #V=matrix(1, ncol=1, nrow=nrow(design_matrix)),#if no V
-                     V=select(design_matrix,c(A_1,A_2,A_3)),#c(sex_num, age_num)
-                     #id=design_matrix$location,#correlation within units
+                     V=select(design_matrix,sex_num),#c(sex_num, age_num)
+                     id=design_matrix$location,#correlation within units
                      
-        #Q.SL.library = all_libraries,#all_libraries, little_libraries
-        #Qbounds = c(0, Inf),
-        #g.SL.library = all_libraries,#all_libraries,# little_libraries
-        MSM="V",#"A:V" similar
-        #verbose=TRUE,
-        V_SL = 2
-        )
-  )
-tmle_MSM_categA}
-
-{system.time(
-  tmle_MSM_contA <- tmleMSM(Y=design_matrix$Y,
-                     A=design_matrix$A,
-                     W=select(design_matrix,c(W1,W2,W3)),
-                     #T=design_matrix$year-1990,
-                     #V=matrix(1, ncol=1, nrow=nrow(design_matrix)),#if no V
-                     V=select(design_matrix,V),#c(sex_num, age_num)
-                     #id=design_matrix$location,#correlation within units
-                     
-        #Q.SL.library = all_libraries,#all_libraries, little_libraries
-        #Qbounds = c(0, Inf),
-        #g.SL.library = all_libraries,#all_libraries,# little_libraries
-        MSM="V",#"A:V"
+        Q.SL.library = all_libraries,#all_libraries, little_libraries
+        Qbounds = c(0, Inf),
+        g.SL.library = all_libraries,#all_libraries,# little_libraries
+        MSM="A*V",#"A*V*T"
         verbose=TRUE,
-        V_SL = 2
+        V_SL = 20
         )
   )
-tmle_MSM_contA}
 
-
-```
-
-# tmle3
-
-``` {r}
-
-library(tmle3)
-library(sl3)
-data(cpp)
-cpp <- cpp[!is.na(cpp[, "haz"]), ]
-cpp$parity01 <- as.numeric(cpp$parity > 0)
-cpp[is.na(cpp)] <- 0
-cpp$haz01 <- as.numeric(cpp$haz > 0)
-
-npsem <- list(
-  define_node("W", c(
-    "apgar1", "apgar5", "gagebrth", "mage",
-    "meducyrs", "sexn"
-  )),
-  define_node("A", c("parity01"), c("W")),
-  define_node("Y", c("haz01"), c("A", "W"))
-)
-
-tmle_task <- tmle3_Task$new(cpp, npsem = npsem)
-
-# get the outcome node data
-head(tmle_task$get_tmle_node("Y"))
-# get the sl3 task corresponding to an outcome regression
-tmle_task$get_regression_task("Y")
-
-# set up sl3 learners for tmle3 fit
-lrnr_glm_fast <- make_learner(Lrnr_glm_fast)
-lrnr_mean <- make_learner(Lrnr_mean)
-# define and fit likelihood
-factor_list <- list(
-  define_lf(LF_emp, "W"),
-  define_lf(LF_fit, "A", lrnr_glm_fast),
-  define_lf(LF_fit, "Y", lrnr_glm_fast, type="mean")
-)
-
-likelihood_def <- Likelihood$new(factor_list)
-likelihood <- likelihood_def$train(tmle_task)
-print(likelihood)
-
-likelihood_values <- likelihood$get_likelihoods(tmle_task,"Y")
-head(likelihood_values)
-
-intervention <- define_lf(LF_static, "A", value = 1)
-
-cf_likelihood <- make_CF_Likelihood(likelihood, intervention)
-
-cf_likelihood_values <- cf_likelihood$get_likelihoods(tmle_task, "A")
-head(cf_likelihood_values)
-
-cf_likelihood_tasks <- cf_likelihood$enumerate_cf_tasks(tmle_task)
-head(cf_likelihood_tasks[[1]]$data)
-
-tsm <- define_param(Param_TSM, likelihood, intervention)
-
-updater <- tmle3_Update$new()
-targeted_likelihood <- Targeted_Likelihood$new(likelihood, updater)
-
-tsm <- define_param(Param_TSM, likelihood, intervention)
-updater$tmle_params <- tsm
-
-tmle_fit <- fit_tmle3(tmle_task, targeted_likelihood, tsm, updater)
-print(tmle_fit)
-
-nodes <- list(W = c("apgar1", "apgar5", "gagebrth", "mage", "meducyrs",
-                    "sexn"),
-              A = "parity01",
-              Y = "haz01")
-lrnr_glm_fast <- make_learner(Lrnr_glm_fast)
-lrnr_mean <- make_learner(Lrnr_mean)
-learner_list <- list(Y = lrnr_mean, A = lrnr_glm_fast)
-# make a new copy to deal with data.table weirdness
-cpp2 <- data.table::copy(cpp)
-tmle_fit_from_spec <- tmle3(tmle_ATE(), cpp2, nodes, learner_list)#tmle_TSM_all
-print(tmle_fit_from_spec)
 ```
 
 # Next ...

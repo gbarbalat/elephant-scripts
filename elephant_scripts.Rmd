@@ -12,9 +12,10 @@ summary
 4- flowchart
 5- accessing data on the internet
 6- gam and bayesian with INLA
-7- VIM with lasso
+7- SuperLearner
 8- CEA
 9- tmle
+10- lmtp
 
 # 1-data reading and cleaning
 
@@ -122,6 +123,8 @@ remain_ %>%
                values_drop_na=TRUE
                )
 
+#also possible to do pivot_wider
+
 ```
 
 ## c-conversion numeric to factors, ordered factors
@@ -206,7 +209,100 @@ SL_data <- SL_data %>%
   mutate(across(where(is.factor),~droplevels(.)))
 ```
 
+## f- discretize
 
+```{r}
+mutate(across(c(Age,GAF,CGI,
+                  SQoL18_SEL:SQoL18_TOT,
+                  WEMWBS_TOT,
+                  ISMI_TOT,
+                  IS_TOT
+                  ), ~ cut(.x,
+                           breaks = numbers_of_bins,
+                           include.lowest = TRUE),
+                           )) 
+
+```
+
+## g-change values after having discretized
+
+```{r}
+
+mutate(across(c(Age,GAF,CGI,
+                  SQoL18_SEL:SQoL18_TOT,
+                  WEMWBS_TOT,
+                  ISMI_TOT,
+                  IS_TOT
+                  ), ~ case_when(.x==4~1,
+                                 .x!=4~0)
+)
+)
+
+
+```
+
+
+## h-quantile and ecdf
+
+``` {r}
+psi_1=psi_results_data[[i]][[idx_psi1]]
+  psi_2=psi_results_data[[i]][[idx_psi2]]
+  psi_3=psi_results_data[[i]][[idx_psi3]]
+  psi_4=psi_results_data[[i]][[idx_psi4]]
+  
+  #ecdf is the inverse of quantile
+Fn1 <- ecdf(psi_1$density_ratios);Fn1(10)
+Fn2 <- ecdf(psi_2$density_ratios);Fn2(10)
+Fn3 <- ecdf(psi_3$density_ratios);Fn3(10)
+Fn4 <- ecdf(psi_4$density_ratios);Fn4(10)
+plot(x,Fn1(x))
+
+Fn1 <- ecdf(psi_1$density_ratios[psi_1$density_ratios!=0]);Fn1(10)
+Fn2 <- ecdf(psi_2$density_ratios[psi_2$density_ratios!=0]);Fn2(10)
+Fn3 <- ecdf(psi_3$density_ratios[psi_3$density_ratios!=0]);Fn3(10)
+Fn4 <- ecdf(psi_4$density_ratios[psi_4$density_ratios!=0]);Fn4(10)
+
+trim=Fn(10)
+
+```
+
+
+
+## i- missing values
+
+```{r}
+###############################################################
+#another strategy for missing values
+###############################################################
+#select everything(ends_with("_NA"))
+NA_dum <- SL_data_30_MHC %>%
+  select(ends_with("_NA"))
+
+#function to find the mode
+find_mode <- function(x) {
+  u <- unique(x)
+  tab <- tabulate(match(x, u))
+  u[tab == max(tab)]
+}
+
+#replace NA by median and mode, then cbind NA_dum (sl3 package strategy)
+mat_new_NA <-mat_A_W_rd_PEC_6dx_MHC_NotDummy_30 %>%
+
+  group_by() %>%
+  mutate(across(where(is.numeric),
+                ~case_when(!is.na(.x)~as.numeric(.x),
+                           is.na(.x)~as.numeric(median(.,na.rm=TRUE)))
+  ),
+  across(where(is.factor),
+         ~case_when(!is.na(.x)~as.factor(.x),
+                    is.na(.x)~factor(find_mode(.))
+         )
+  ),
+  STORI=replace(STORI,is.na(STORI),"REBUILDING")#as this is the mode (not NA)
+  ) %>%
+  cbind(NA_dum)
+
+```
 # 2-ggplot2
 
 ```{r}
@@ -232,18 +328,34 @@ ggplot(data=TAB_EST,
   )+
   scale_x_discrete(limits = c("eat","anx","bip","dep"),
                    labels=c("Eating\ndisorders","Anxiety\ndisorders",
-                            "Bipolar\ndisorders","Depressive\ndisorders")+
+                            "Bipolar\ndisorders","Depressive\ndisorders"))+
   scale_colour_manual(values = c("black", "darkblue","lightblue","grey"))+
 
   coord_flip()+
   #facet_wrap(~Effect)
-
-scale_fill_gradient2(low = "blue", high = "red") +
-      theme(legend.title = element_blank(),
+  scale_fill_gradient2(low = "blue", high = "red") +
+  theme(legend.title = element_blank(),
             legend.position = c(.95,.60),
             panel.background = element_rect(fill = "grey"),
             legend.box  = "none",
             panel.grid = element_blank())
+
+
+    name.labs <- c("Male", "Female")
+    names(name.labs) <- c("1", "2")
+    ggplot(full_data, aes(x=factor(V2), y=val_base, fill=factor(A_base))) +
+      geom_boxplot()+
+      scale_x_discrete(limits=c("1","2"),
+                       labels=c("15-19 y/o","20-24 y/o"))+
+      facet_grid(~V1, labeller = labeller(V1 = name.labs))+ 
+      labs(title="", x="Age groups", y="1996 CUD DALYs",fill="MML")+
+      scale_color_discrete(name="MML")+ 
+      theme(#legend.position = "none",
+            panel.background = element_rect(fill = "white",colour = "black"),
+            strip.background = element_rect(colour = "black", fill = "white"),
+            strip.text.x = element_text(colour = "black", size=14),# face = "bold",
+            axis.title.x = element_text(size=16),axis.title.y = element_text(size=16)
+      )
 
 ```
 
@@ -503,36 +615,543 @@ library(gamm4)
 ```
 
 
-# 7-VIM with lasso
-```{r}
-library(glmnet)
-glmnet1=sl[[i]][[1]]$fitLibrary$SL.glmnet_All$object
-coeff_glmnet1<-coef(glmnet1,s='lambda.min')#lambda.min lambda.1se
-var_glmnet<- data.frame(name = coeff_glmnet1@Dimnames[[1]][coeff_glmnet1@i + 1],
-           coefficient = coeff_glmnet1@x)
-print(var_glmnet)
-```
+# 7-SuperLearner and VIM
 
-# 8-CEA 
+
+## 7-a SuperLearner package
 
 ```{r}
-DW_0
-Age_std_DALYs_0
-ES_1
-Andrews_factor
-pct_coverage=0.8
 
-DW_1=DW_0-(ES_1*Andrews_factor)
-pct_improved_1=(DW_1-DW_0)/DW_0
-Age_std_DALYs_1=Age_std_DALYs_0-pct_improved1*pct_coverage*Age_std_DALYs_0
-Averted_DALYs_1=Age_std_DALYs_1-Age_std_DALYs_0
+###############################################################
+#prepare SL libraries using SuperLearner package
+###############################################################
+listWrappers()
+
+#add on highly adaptive lasso
+SL.hal9001<- function (Y, X, newX = NULL, family = "binomial", 
+                    obsWeights = rep(1, length(Y)), id = NULL, max_degree = ifelse(ncol(X) >= 20,2, 3),
+                    smoothness_orders = 1, num_knots = ifelse(smoothness_orders >= 1, 25, 50),
+                    reduce_basis = 1/sqrt(length(Y)), lambda = NULL, 
+                    ...) 
+{
+  if (!is.matrix(X)) 
+    X <- as.matrix(X)
+  if (!is.null(newX) & !is.matrix(newX)) 
+    newX <- as.matrix(newX)
+  hal_fit <- fit_hal(X = X, Y = Y, family = family$family, 
+                     fit_control = list(weights = obsWeights), id = id, max_degree = max_degree, 
+                     smoothness_orders = smoothness_orders, num_knots = num_knots, 
+                     reduce_basis = reduce_basis, lambda = lambda)
+  if (!is.null(newX)) {
+    pred <- stats::predict(hal_fit, new_data = newX)
+  }
+  else {
+    pred <- stats::predict(hal_fit, new_data = X)
+  }
+  fit <- list(object = hal_fit)
+  #class(fit) <- "SL.hal9001"
+  out <- list(pred = pred, fit = fit)
+  return(out)
+}
+SL.library_my_own=c('SL.hal9001')
+##########
 
 
+## All screening algorithm wrappers in SuperLearner:
+## [1] "All"
+## [1] "screen.SIS"            "screen.corP"           "screen.corRank"       
+## [4] "screen.glmnet"         "screen.randomForest"   "screen.template"      
+## [7] "screen.ttest"          "write.screen.template"
+SL.library= c( #"SL.randomForest", "SL.xgboost", 
+               #"SL.step.forward", #"SL.stepAIC"#"SL.step.interaction",
+               "SL.step.forward",
+               "SL.glmnet", "SL.earth",
+               "SL.mean"
+               )
+
+# #
+little_SL.library="SL.glmnet"
+#                
+
+ cvControl = list(V = 2, stratifyCV=FALSE, shuffle=TRUE) 
+innerCvControl = list(list(V=4))
+#or you can use the standard arguments
+
+method = "method.AUC" # "method.AUC" "method.NNloglik" "method.NNLS"
+###############################################################
+
+
+
+###############################################################
+#your Y
+#test one PSR method vs. another
+PEC_OI=c("SOC_ASP",
+         "EDUC",
+         "CBT",
+         "COG_REM"
+)
+###############################################################
+
+
+###############################################################
+#what you'll do
+#SL WITH LASSO ONLY FOR CV
+#SL WITH A BUNCH OF LIBRARIES
+###############################################################
+
+###############################################################
+#cluster your analysis
+###############################################################
+{
+  num_cores <- detectCores()
+  cl <- makeCluster(num_cores-2)
+  clusterEvalQ(cl,c(library(SuperLearner),library(dplyr)))
+  clusterExport(cl, list("little_SL.library","SL.library","cvControl","innerCvControl","method"))
+  
+  try_this <- function(x,SL_data, PEC_OI) {
+    
+    Y<-SL_data %>%
+      dplyr::select(matches(PEC_OI[x],ignore.case=FALSE)) %>%
+      mutate(across(everything(.),~ replace(., is.na(.), 0) )) #comment if No exclude NA and replace by
+    
+    Y=ifelse(Y==1,1,0)
+    
+    X=select(SL_data,-c(StudySubjectID,
+                        #c("ProtocolID_02_C3R_CH Alpes-Isère":ProtocolID_20_SAMSAH_ALGED),#comment if No centre dummies
+                        # "ProtocolID_05_C2RP_ CH Tour de Gassies",
+                        # "ProtocolID_08_CRPS/CH ROANNE",
+                        # "ProtocolID_11_CESAR_SAMSAH_CH SJdD de Lyon":"ProtocolID_20_SAMSAH_ALGED",
+                        #comment if No centre dummies
+                        
+                        # c(SQoL18_SEL_2:SQoL18_ROM_NA),#remove all susbcales from SQOL            
+                        #c(SQoL18_TOT_2:SQoL18_TOT_NA),#remove sum of subscales from SQOL
+                        # c(WEMWBS_TOT_2:WEMWBS_TOT_NA),#remove all things from WEMWBS_TOT
+                        # c(ISMI_TOT_2:ISMI_TOT_NA),#remove all things from ISMI_TOT  
+                        # #c(IS_TOT_2:IS_TOT_NA),#remove all things from IS_TOT
+                        CBT,SOC_ASP,COG_REM,EDUC
+    ))
+    
+    sl_all = CV.SuperLearner(Y = Y, X=X,
+                         family = binomial(),
+                         cvControl = cvControl,
+                         method=method,
+                         SL.library = SL.library
+                         )
+    
+    
+    cv_sl_all = CV.SuperLearner(Y = Y, X=X,
+                         family = binomial(),
+                         cvControl = cvControl,
+                         innerCvControl=innerCvControl,
+                         method=method,
+                         SL.library = SL.library
+                         )
+    # return(list(sl_glmnet,sl_all))#,cv_sl_all
+    return(cv_sl_all)
+    
+  }
+  
+  # system.time(sl_50 <-clusterApply(cl,1:4,try_this,SL_data=SL_data_50_MHC, PEC_OI=PEC_OI))
+  # system.time(sl_40 <-clusterApply(cl,1:4,try_this,SL_data=SL_data_40_MHC, PEC_OI=PEC_OI))
+  system.time(sl_30 <-clusterApply(cl,1:4,try_this,SL_data=SL_data_30_MHC, PEC_OI=PEC_OI))
+  # system.time(sl_20 <-clusterApply(cl,1:4,try_this,SL_data=SL_data_20_MHC, PEC_OI=PEC_OI))
+  # system.time(sl_allData <-clusterApply(cl,1:4,try_this,SL_data=SL_data_MHC, PEC_OI=PEC_OI))
+  
+  # system.time(sl_new_NA <-clusterApply(cl,1:4,try_this,SL_data=mat_new_NA, PEC_OI=PEC_OI))
+  
+  
+  
+ 
+  #save(file="sl_cv_MHC.RData",sl_50,sl_40,sl_30,sl_20,sl_allData)
+  
+  stopCluster(cl)
+}
+##########the end
+###############################################################
 
 
 ```
 
-# 9-tmle
+
+## 7-a VIM after you've done a SL anal
+```{r}
+# Prediction wrapper functions for SL VIM
+imp_fun <- function(object, newdata) { # for permutation-based VI scores
+  predict(object, newdata = newdata)$pred
+}
+par_fun <- function(object, newdata) { # for PDPs
+  mean(predict(object, newdata = newdata)$pred)
+}
+
+# #load results from SL analysis
+# load(file="sl_cv_MHC.RData");
+# 
+# PEC_OI=c("SOC_ASP",
+#          "EDUC",
+#          "CBT",
+#          "COG_REM"
+# )
+
+#big for loop for variable importance analysis
+for (i in 1:length(PEC_OI)) {
+  
+  print(PEC_OI[i]);
+  
+  sl_50_glmnet=sl_50[[i]][[1]];#after a SL anal on glmnet
+  
+  sl_50_allAlgo=sl_50[[i]][[2]];#after a SL anal on a number of algo
+  #############################
+  
+  
+  ##############################
+  #VIM with lasso
+  var_imp_LASSO <- function(sl) {
+    
+    glmnet_1=sl$fitLibrary$SL.glmnet_All$object
+    coeff_glmnet<-coef(glmnet_1,s='lambda.min')#lambda.min lambda.1se
+    var_glmnet <- data.frame(name = coeff_glmnet@Dimnames[[1]][coeff_glmnet@i + 1],
+                             coefficient = coeff_glmnet@x)
+    return(var_glmnet)
+  }
+  var_imp_glmnet_50<-var_imp_LASSO(sl_50_glmnet)
+  ##############################
+  
+  ##############################
+  #VIM with SL
+  {# Setup parallel backend
+    cl <- makeCluster(5) # use 5 workers
+    registerDoParallel(cl) # register the parallel backend
+    # Permutation-based feature importance
+    
+    var_imp_SL <- function(SL_data,sl) {
+      
+      Y<-SL_data %>%
+        dplyr::select(matches(PEC_OI[i],ignore.case=FALSE))%>%
+        mutate(across(everything(.),
+                      ~ replace(., is.na(.), 0)
+        ))
+      Y=ifelse(Y==1,1,0)
+      
+      X=select(SL_data,-c(StudySubjectID,
+                          #PSR,N_PEC,
+                          CBT,SOC_ASP,COG_REM,EDUC
+      ))
+      Interesting_features=X %>%
+        select(-c("ProtocolID_02_C3R_CH Alpes-Isère":ProtocolID_20_SAMSAH_ALGED,ends_with("_NA")
+        )) %>%
+        colnames()
+      
+      var_imp <- vi(sl, 
+                    method = "permute", ########can't use "model specific" VI scores with SL
+                    train = X, #no train and test, beware ...
+                    target = Y, 
+                    feature_names = Interesting_features,
+                    metric = "auc", ####### #list_metrics() --- metric = "auc", rsquared", "rmse". "mse" etc...
+                    reference_class="0",
+                    type = "difference", 
+                    pred_wrapper = imp_fun, 
+                    nsim = 5, 
+                    parallel = TRUE)
+      return(var_imp)
+    }
+    
+    var_imp_sl_50<-var_imp_SL(SL_data=SL_data_50_MHC,sl=sl_50_glmnet)
+    
+    stopCluster(cl)
+  }
+}#end of big for loop
+
+
+imp_fun <- function(object, newdata) { # for permutation-based VI scores
+    N_fold <- length(object$AllSL)
+    all_preds=vector(length=nrow(newdata))
+    
+    #for each fold, call predict function
+    for (i in 1:N_fold) {
+      SL_model=object$AllSL[[i]]
+      which_row=as.integer(rownames(object$AllSL[[i]]$SL.predict))
+      all_preds[which_row]=predict.SuperLearner(object=SL_model, newdata = newdata[which_row,])$pred
+      #, newdata = newdata[which_row,]
+    }
+    
+    return(all_preds)
+  }
+  imp_fun(object=test,newdata=X)
+
+```
+
+## 7-c sl3 package
+
+```{r}
+#########
+#try it on with sl3 package!
+#can have a multinomial Y!
+##########
+#################################################################
+#####multinomial
+#################################################################
+#first transform data.frame
+SL_data<-SL_data_30_MHC %>% 
+  tidyr::pivot_longer(cols = c("CBT","EDUC","COG_REM","SOC_ASP"),
+                      names_to="PSR",
+                      values_to="order") %>%
+  filter(order==1) %>%
+  select(-order) %>%
+  mutate(PSR=ifelse(PSR==matches(PEC_OI[i],ignore.case=FALSE),1,0))
+
+outcome <- "PSR"
+covars <- colnames(SL_data)[-which(names(SL_data) == outcome | names(SL_data) == "StudySubjectID")
+                            ]
+#covars <- covars[1:6]
+
+# create the sl3 task
+SL_task <- make_sl3_Task(
+  data = SL_data,
+  covariates = covars,
+  outcome = outcome
+)
+
+SL_task
+
+length(SL_task$folds) # how many folds?
+
+head(SL_task$folds[[1]]$training_set) # row indexes for fold 1 training
+
+head(SL_task$folds[[1]]$validation_set) # row indexes for fold 1 validation
+
+any(
+  SL_task$folds[[1]]$training_set %in% SL_task$folds[[1]]$validation_set
+)
+
+sl3_list_learners("binomial")
+
+# choose base learners and stack them
+lrn_glm <- make_learner(Lrnr_glm)#
+
+lrn_mean <- Lrnr_mean$new()
+lrn_lasso <- make_learner(Lrnr_glmnet) # alpha default is 1
+lrn_polspline <- Lrnr_polspline$new() # model size too big 
+lrn_ranger100 <- make_learner(Lrnr_ranger, num.trees = 100)
+lrn_hal_faster <- Lrnr_hal9001$new()#
+xgb_50 <- Lrnr_xgboost$new(nrounds = 50)
+grid_params <- list(
+  max_depth = c(2, 4, 6),
+  eta = c(0.001, 0.1, 0.3),
+  nrounds = 100
+)
+grid <- expand.grid(grid_params, KEEP.OUT.ATTRS = FALSE)
+grid
+xgb_learners <- apply(grid, MARGIN = 1, function(tuning_params) {
+  do.call(Lrnr_xgboost$new, as.list(tuning_params))
+})
+do.call(c,xgb_learners)
+c(xgb_learners[[1]][[1]],xgb_learners[[2]][[1]])
+
+lrn_ridge <- Lrnr_glmnet$new(alpha = 0)
+lrn_enet.5 <- make_learner(Lrnr_glmnet, alpha = 0.5)
+
+stack <- make_learner(
+  Stack, lrn_mean,lrn_hal_faster,lrn_lasso,lrn_ridge,lrn_enet.5,
+  xgb_50,lrn_ranger100
+  )#
+
+#'all of the learners will train in a cross-validated manner.
+cv_stack <- Lrnr_cv$new(stack)
+
+#screening?
+
+#meta learner
+sl <- make_learner(Lrnr_sl, learners = stack)#ensemble sl
+
+discrete_sl_metalrn <- Lrnr_cv_selector$new()#discrete sl is the cv selector
+discrete_sl <- Lrnr_sl$new(
+  learners = stack,
+  metalearner = discrete_sl_metalrn
+)
+
+#train SL
+sl_fit <- sl$train(SL_task)
+
+# we did it! now we have SL predictions
+sl_preds <- sl_fit$predict()
+head(sl_preds)
+sl_preds=unlist(sl_preds, recursive = F)
+# preds=do.call(rbind,sl_preds)
+# head(preds)
+# colnames(preds)=c("1","2","3","4")
+
+# summary 
+sl_fit$cv_risk(loss_fun = loss_loglik_binomial)
+#AUC
+pROC::multiclass.roc(response=SL_data$PSR,
+                     predictor=sl_preds)#as.integer(pred_glmnet) pred_glmnet[,,]
+pROC::auc(response=SL_data$PSR,predictor=sl_preds)#as.integer(pred_glmnet) pred_glmnet[,,]
+# > library(ROCR) # for AUC calculation
+# > 
+#   > AUC <- performance(prediction(sl_preds, SL_data$PSR), measure = "auc")@y.values[[1]]
+# > plot(performance(prediction(sl_preds, SL_data$PSR), "tpr", "fpr"))
+
+
+#CV SL
+SL_task_new <- make_sl3_Task(
+  data = SL_data,
+  covariates = covars,
+  outcome = outcome,
+  folds = origami::make_folds(SL_data, fold_fun = folds_vfold, V = 2)
+)
+CVsl <- CV_lrnr_sl(
+  lrnr_sl = sl_fit, task = SL_task_new, loss_fun = loss_loglik_binomial
+)
+CVsl %>%
+  kable(digits = 4) %>%
+  kableExtra:::kable_styling(fixed_thead = T) %>%
+  scroll_box(width = "100%", height = "300px")
+
+
+
+
+#Importance analysis
+SLdata_varimp <- importance(sl_fit, 
+                            fold_number = "validation",
+                            loss = loss_loglik_binomial, 
+                            importance_metric = "difference",
+                            type = "permute")
+SLdata_varimp %>%
+  kableExtra::kable(digits = 4) %>%
+  kableExtra::kable_styling(fixed_thead = TRUE) %>%
+  kableExtra::scroll_box(width = "100%", height = "300px")
+
+}
+
+```
+
+## 7-d ML quality of fit
+
+``` {r}
+
+pROC::auc(as.vector(Y),pred_glmnet)
+AUC(pred_glmnet,as.vector(Y))#same as above
+
+#Fit with hal
+hal_fit <-fit_hal(X = X, Y = Y, family = "binomial",
+                  fit_control =  ,
+                  #formula = ~ h(.),# + h(., .) +h(.,.,.)
+                  
+                  #reduce_basis = 0.3,
+                  #smoothness_orders = 0,#corresponds to a piece-wise polynomial fit of degree k
+                  #num_knots  = 2 #specify the number of knots for each/all interaction degree(s)
+)
+pred_hal <- predict(hal_fit, new_data = X)
+
+mean((pred_hal - Y)^2)
+
+auc(as.vector(Y),pred_hal)
+s<-summary(hal_fit)
+
+
+#multinomial fit
+#fit with lasso
+glmnet_fit<-glmnet(X,Y, family = "multinomial")
+cvfit <- cv.glmnet(as.matrix(X), Y, family="multinomial",nfolds = 10,type.measure = "deviance")#class or deviance
+pred_glmnet <- predict(glmnet_fit, as.matrix(X), type="class",#class","response"
+                                  s = cvfit$lambda.min)
+pROC::multiclass.roc(response=Y,predictor=as.integer(pred_glmnet) )#as.integer(pred_glmnet) pred_glmnet[,,]
+tmp <- data.frame(response=Y,predictor=as.integer(pred_glmnet) )#as.integer(pred_glmnet) pred_glmnet[,,]
+tmp <- tmp %>%
+  mutate(equal=case_when(response==predictor~1,
+                         response!=predictor~0
+                         
+                         ))
+mean(tmp$equal)
+```
+
+# 8-cluster
+
+#https://github.com/Statology/R-Guides/blob/main/hierarchical_clustering.R
+#https://www.statology.org/hierarchical-clustering-in-r/
+
+```{r}
+
+#load data
+df <- USArrests
+
+#remove rows with missing values
+df <- na.omit(df)
+
+#scale each variable to have a mean of 0 and sd of 1
+df <- scale(df)
+
+#define linkage methods
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+#function to compute agglomerative coefficient
+ac <- function(x) {
+  agnes(df, method = x)$ac
+}
+
+#calculate agglomerative coefficient for each clustering linkage method
+sapply(m, ac)
+
+#perform hierarchical clustering using Ward's minimum variance
+clust <- agnes(df, method = "ward")
+
+#produce dendrogram
+pltree(clust, cex = 0.6, hang = -1, main = "Dendrogram") 
+
+#calculate gap statistic for each number of clusters (up to 10 clusters)
+gap_stat <- clusGap(df, FUN = hcut, nstart = 25, K.max = 10, B = 50)
+
+#produce plot of clusters vs. gap statistic
+fviz_gap_stat(gap_stat)
+
+#compute distance matrix
+d <- dist(df, method = "euclidean")
+
+#perform hierarchical clustering using Ward's method
+final_clust <- hclust(d, method = "ward.D2" )
+
+#cut the dendrogram into 4 clusters
+groups <- cutree(final_clust, k=4)
+
+# Number of members in each cluster
+table(groups)
+
+#append cluster labels to original data
+final_data <- cbind(USArrests, cluster = groups)
+
+#display first six rows of final data
+head(final_data)
+
+#find mean values for each cluster
+aggregate(final_data, by=list(cluster=final_data$cluster), mean)
+
+
+
+
+# 2. Fuse observations into clusters.
+# 
+# At each step in the algorithm, fuse together the two observations that are most similar into a single cluster. Each step basically repeats this procedure until all observations are members of one large cluster. The end result is a tree, which can be plotted as a dendrogram. 
+# 
+# To determine how many clusters the observations should be grouped in, we can use a metric known as the gap statistic, which compares the total intra-cluster variation for different values of k with their expected values for a distribution with no clustering.
+# 
+# We’ll choose to group our observations into the number of clusters for which the gap statistic is highest.
+ 
+
+final_data <- cbind(USArrests, cluster = groups)
+final_data=cbind(final_data,id=rownames(final_data))
+final_data=tidyr::pivot_longer(final_data, cols=Murder:Rape)
+final_data=dplyr::arrange(final_data,cluster)
+final_data=dplyr::group_by(final_data,cluster)
+
+ggplot(final_data,aes(x=id,y=name, fill=value)) +
+geom_tile()+
+facet_wrap(~cluster)
+#Reprendre les commandes des graphs de scientific reports
+
+```
+
+# 9-tmle/lmtp
 
 ```{r}
 library(tmle)
@@ -559,6 +1178,101 @@ system.time(
         )
   )
 
+
+#### using lmtp
+#check Rmd from
+#[1] "C:/Users/Guillaume/Desktop/Recoverit 2022-04-17 at 22.09.53/PROJECTS/2022/sAP Globalization/LMTP"
+
+
+##########
+
+final_matrix_quality_2019$categ_KOFGI2=factor(final_matrix_quality_2019$categ_KOFGI,
+                                              ordered=TRUE)
+final_matrix_quality_2019$categ_KOFGI2=final_matrix_quality_2019$categ_KOFGI-1
+final_matrix_quality_2019$KOFGI2=final_matrix_quality_2019$KOFGI-min(final_matrix_quality_2019$KOFGI)
+
+###using causal glm
+
+mean_lrnr <- Lrnr_mean$new()
+fglm_lrnr <- Lrnr_glm_fast$new()
+step.f_lrnr <- Lrnr_glm$new()
+ranger_lrnr <- Lrnr_randomForest$new()#ranger does not work very well
+glmnet_lrnr <- Lrnr_glmnet$new()
+mars_lrnr <- Lrnr_earth$new()
+# SL for the outcome regression
+sl_reg_lrnr <- Lrnr_sl$new(
+  learners = list(mean_lrnr,step.f_lrnr, fglm_lrnr, glmnet_lrnr, mars_lrnr),
+  metalearner = Lrnr_nnls$new()
+)
+sl3_Learner_A <- Lrnr_cv$new(sl_reg_lrnr, full_fit = TRUE)
+sl3_Learner_Y <- Lrnr_cv$new(sl_reg_lrnr, full_fit = TRUE)
+
+
+out <- npglm(
+  ~1, 
+  treatment_level = c(0,1,2,3),
+  data = final_matrix_quality_2019,
+  W = W, 
+  A = "categ_KOFGI2", 
+  Y = "log_Y",
+  estimand = "TSM",
+  sl3_Learner_A=sl_reg_lrnr,
+  sl3_Learner_Y=sl_reg_lrnr,
+  #cross_fit = TRUE,
+  # learning_method = "glm",
+)
+out
+
+
+out2 <- contglm(
+  formula_continuous = ~ 1 ,
+  formula_binary =  ~ -1,#RAS NULL 1 0 vs. -1
+  data = final_matrix_quality_2019,
+  W = W, 
+  A = "categ_KOFGI2", Y = "log_Y",
+  estimand = "CATE",
+  sl3_Learner_A=sl_reg_lrnr,#sl_reg_lrnr
+  sl3_Learner_Y=sl_reg_lrnr,
+  # learning_method = "glm",
+)
+summary(out2)
+##########
+```
+
+# 10- Classification other than with SuperLearner
+http://www.sthda.com/english/articles/36-classification-methods-essentials/146-discriminant-analysis-essentials-in-r/
+
+```{r}
+
+library(tidyverse)
+library(caret)
+
+data("iris")
+# Split the data into training (80%) and test set (20%)
+set.seed(123)
+training.samples <- iris$Species %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data <- iris[training.samples, ]
+test.data <- iris[-training.samples, ]
+
+#Normalize the data. Categorical variables are automatically ignored.
+# Estimate preprocessing parameters
+preproc.param <- train.data %>% 
+  preProcess(method = c("center", "scale"))
+# Transform the data using the estimated parameters
+train.transformed <- preproc.param %>% predict(train.data)
+test.transformed <- preproc.param %>% predict(test.data)
+
+library(MASS)
+# Fit the model
+model <- lda(Species~., data = train.transformed)
+model
+# Coefficients of linear discriminants: Shows the linear combination of predictor variables that are used to form the LDA decision rule. for example, LD1 = 0.91*Sepal.Length + 0.64*Sepal.Width - 4.08*Petal.Length - 2.3*Petal.Width. Similarly, LD2 = 0.03*Sepal.Length + 0.89*Sepal.Width - 2.2*Petal.Length - 2.6*Petal.Width.
+
+# Make predictions
+predictions <- model %>% predict(test.transformed)
+# Model accuracy
+mean(predictions$class==test.transformed$Species)
 ```
 
 # Next ...
